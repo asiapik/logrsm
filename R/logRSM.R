@@ -8,6 +8,7 @@ compute_initial_weights = function(y,x){
   return(initial_weights)
 }
 
+
 is.wholenumber = function(x, tol = .Machine$double.eps^0.5){
 # The function checks if the given number is whole number.
 
@@ -34,20 +35,69 @@ compute_scores = function(y,x,m,B,initial_weights=NULL){
   return(scores)
 }
 
+select_finalmodel_bic = function(y,x,order1,thrs,penalty){
+# The function returns final model using Bayesian Information Criterion.
+
+  n = length(y)
+  lm0 = lm(y~1)
+  beta0 = as.numeric(coef(lm0))
+  rss0 = sum(lm0$residuals^2)
+  bic0 = n*log(rss0/n)+1*penalty
+
+  xo = x[,order1[1:thrs]]
+  xo = cbind(1,xo)
+  xo = as.matrix(xo)
+
+
+  qr1 = qr(xo)
+
+  Q = qr.Q(qr1)
+  R = qr.R(qr1)
+  R_inv = solve(R)
+
+  tQy = t(Q) %*% y
+
+  betabj = vector("list",thrs)
+  rssj =  numeric(thrs)
+  bic = numeric(thrs)
+
+
+  RSthrs = y-Q %*% tQy
+  rssj[thrs] = t(RSthrs) %*% RSthrs
+  for(j in thrs:2){
+    rssj[j-1] = rssj[j]+ tQy[(j+1)]^2
+    bic[j] = n*log(rssj[j]/n)+(j+1)*penalty
+  }
+
+  bic[1] =  n*log(rssj[1]/n)+2*penalty
+
+  sel = which.min(bic)
+  betab = as.numeric(R_inv[1:(sel+1),1:(sel+1)] %*% tQy[1:(sel+1)])
+  model_sel = order1[1:sel]
+
+  if(bic0<bic[sel]){
+    betab = beta0
+    model_sel = 0
+  }
+
+  Result = list(model=model_sel,informationCriterion=bic,coefficients=betab)
+  return(Result)
+}
+
 new.logRSM <- function()
 {
 
   logRSM=list(scores=NULL,model=NULL,time=list(user=0,system=0,elapsed=0),
       data_transfer=list(user=0,system=0,elapsed=0),
       coefficients=NULL, predError=NULL,input_data=list(x=NULL,y=NULL),
-      control=list(selval=NULL,screening=NULL,init_weights=FALSE,m=NULL,B=NULL))
+      control=list(useGIC=NULL,selval=NULL,screening=NULL,init_weights=FALSE,parallel=NULL,m=NULL,B=NULL))
 
   attr(logRSM,"class")="logRSM"
   return(logRSM)
 }
 
-logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
-    store_data=FALSE,screening=NULL,init_weights=FALSE,thrs=NULL,penalty=NULL,initial_weights=NULL)
+logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL, parallel="NO",nslaves=c(4),
+    store_data=FALSE,screening=NULL,init_weights=FALSE,useGIC=TRUE,thrs=NULL,penalty=NULL,initial_weights=NULL)
 {
   if (init_weights) {
     if (!is.null(initial_weights)) {
@@ -104,21 +154,44 @@ logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
     scores = scores1
   }
 
+
   selval = ifelse(!is.null(yval) && !is.null(xval),TRUE,FALSE)
-  if(selval==TRUE){
+  if(selval) useGIC = FALSE
+
+  if(useGIC){
+    if(is.null(penalty)){
+      penalty = log(length(y))
+    }else{
+      if(penalty<0) stop("Penalty must be positive!")
+    }
+    if(is.null(thrs)){
+      thrs = ifelse(p<=floor(n/2),p,floor(n/2))
+    }else{
+      if(thrs>min(p,(n-2))) stop("Parameter thrs cannot be larger than min(p,(n-2))!")
+      if(thrs<=1) stop("Parameter thrs must be greater than one!")
+      if(!is.wholenumber(thrs)) stop("Parameter thrs must be a whole number!")
+    }
     order1 = sort(scores,decreasing=TRUE,index.return=TRUE)$ix
-    selected_model = select_finalmodel_qr(y,data_x,yval,xval,order1)
+    selected_model = select_finalmodel_bic(y,data_x,order1,thrs,penalty)
     model = selected_model$model
     coefficients =  as.numeric(selected_model$coefficients)
-    predError = selected_model$predError
-    informationCriterion = NULL
-  }else{
-    model = NULL
-    coefficients =  NULL
     predError = NULL
-    informationCriterion = NULL
+    informationCriterion = selected_model$informationCriterion
+  }else{
+    if(selval==TRUE){
+      order1 = sort(scores,decreasing=TRUE,index.return=TRUE)$ix
+      selected_model = select_finalmodel_qr(y,data_x,yval,xval,order1)
+      model = selected_model$model
+      coefficients =  as.numeric(selected_model$coefficients)
+      predError = selected_model$predError
+      informationCriterion = NULL
+    }else{
+      model = NULL
+      coefficients =  NULL
+      predError = NULL
+      informationCriterion = NULL
+    }
   }
-
   stopTime <- proc.time()
 
   logRSM = new.logRSM()
@@ -131,9 +204,11 @@ logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
   logRSM$data_transfer = d2-d1
   if(store_data) { logRSM$input_data$x=data_x; logRSM$input_data$y=y }
 
+  logRSM$control$useGIC = useGIC
   logRSM$control$selval = selval
   logRSM$control$screening = screening
   logRSM$control$init_weights =  init_weights
+  logRSM$control$parallel = parallel
   logRSM$control$m = m
   logRSM$control$B = B
 
