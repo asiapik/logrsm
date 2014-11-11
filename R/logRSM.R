@@ -1,21 +1,15 @@
 # based on regRSM package (http://cran.r-project.org/web/packages/regRSM/)
 
-compute_initial_weights = function(y,x){
-# The function returns initial weights.
-
-  initial_weights = as.numeric(cor(y,x))^2
-  initial_weights = initial_weights/(sum(initial_weights))
-  return(initial_weights)
-}
-
+#' Checks if the given number is whole number.
+#' 
+#' @param x number to be checked
+#' @param tol precision
 is.wholenumber = function(x, tol = .Machine$double.eps^0.5){
-# The function checks if the given number is whole number.
-
   abs(x - round(x)) < tol
 }
 
-compute_scores = function(y,x,m,B,initial_weights=NULL){
-# The function returns RSM scores.
+#' Compute RSM scores.
+compute_scores = function(y, x, m, B, initial_weights = NULL){
 
   p = ncol(x)
   scores = numeric(p)
@@ -40,20 +34,39 @@ new.logRSM <- function()
   logRSM=list(scores=NULL,model=NULL,time=list(user=0,system=0,elapsed=0),
       data_transfer=list(user=0,system=0,elapsed=0),
       coefficients=NULL, predError=NULL,input_data=list(x=NULL,y=NULL),
-      control=list(selval=NULL,screening=NULL,init_weights=FALSE,m=NULL,B=NULL))
+      control=list(selval=NULL,screening=NULL,m=NULL,B=NULL))
 
   attr(logRSM,"class")="logRSM"
   return(logRSM)
 }
 
-logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
-    store_data=FALSE,screening=NULL,init_weights=FALSE,thrs=NULL,penalty=NULL,initial_weights=NULL)
+#' Main function - calculate logRSM
+#'
+#' @param x
+#' @param y
+#' @param m
+#' @param B
+#' @param store_data
+#' @param initial_weights
+#' @return 
+#' 
+#' \code{initial_weights} parameter could be an array with weights or
+#' a function, that accepts two parameters: \code{class} and \code{data}
+#' and returns weigths.
+#' Two functions \link{calculate_weigths_with_cor} and \link{calculate_weigths_with_t}
+#' are provided.
+logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL, B = NULL,
+    store_data = FALSE, screening = NULL, initial_weights = NULL)
 {
-  if (init_weights) {
-    if (!is.null(initial_weights)) {
-      stop('init_weights cannot be TRUE if initial_weigths are provided')
+  
+  # checsk, if initial weights is a function
+  if (!is.null(initial_weights)) {
+    # if it's a functtion - call it
+    if (is.function(initial_weights)) {
+      initial_weights = initial_weights(y, x)
     }
   }
+  
   data_x = x;
   x = as.matrix(x)
   y = as.numeric(y)
@@ -87,10 +100,6 @@ logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
     sel = which(iw>=quantile(iw,screening))
     if(m>length(sel)) stop('Parameter m cannot be larger than the number of attributes remaining after screening procedure!')
     x = x[,sel]
-  }
-  #Check for initial_weights
-  if(init_weights){
-    initial_weights = compute_initial_weights(y,x)
   }
 
   #RSM method esence
@@ -129,18 +138,22 @@ logRSM = function(y,x,yval=NULL,xval=NULL,m=NULL,B=NULL,
   logRSM$predError = predError
   logRSM$informationCriterion = informationCriterion
   logRSM$data_transfer = d2-d1
-  if(store_data) { logRSM$input_data$x=data_x; logRSM$input_data$y=y }
+  if (store_data) {
+    logRSM$input_data$x = data_x;
+    logRSM$input_data$y = y 
+  }
 
   logRSM$control$selval = selval
   logRSM$control$screening = screening
-  logRSM$control$init_weights =  init_weights
+  logRSM$control$initial_weights =  initial_weights
   logRSM$control$m = m
   logRSM$control$B = B
 
   return(logRSM)
 }
 
-calculate_initial_weigths_with_t = function(class, data) {
+#' calculate weights using T test.
+calculate_weigths_with_t = function(class, data) {
   result = numeric(ncol(data)); 
   for (i in 1:ncol(data)) {
     x = numeric();
@@ -159,3 +172,9 @@ calculate_initial_weigths_with_t = function(class, data) {
   return (result)
 }
 
+#' calculate weights using correlations.
+calculate_weigths_with_cor = function(class, data) {
+  initial_weights = as.numeric(cor(class, data))^2
+  initial_weights = initial_weights/(sum(initial_weights))
+  return(initial_weights)
+}
