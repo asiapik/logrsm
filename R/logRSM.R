@@ -18,25 +18,24 @@ continue_calculations = function(stopControl, counter, ns, startTime) {
   if (!is.null(stopControl$max_time)) {
     currentTime = Sys.time()
     if (as.numeric(difftime(currentTime, startTime, units = 'secs')) > stopControl$max_time) {
-      print('czas minal')
-      return (FALSE)
+      return ('TIME')
     }
   }
   if (!is.null(stopControl$B)) {
     if (counter >= stopControl$B) {
-      return (FALSE)
+      return ('ITERATION')
     }
   }
   if (!is.null(stopControl$min_ns)) {
     min_ns = stopControl$min_ns
     for (k in ns) {
       if (k < min_ns) {
-        return (TRUE)
+        return ('CONTINUE')
       }
     }
-    return (FALSE)
+    return ('SELECTION')
   }
-  return (TRUE)
+  return ('CONTINUE')
 }
 
 #' Compute RSM scores.
@@ -46,8 +45,8 @@ compute_scores = function(y, x, m, stopControl, initial_weights = NULL){
   ns = numeric(p)
 
   counter = 0
-  startTime <- Sys.time()
-  while (continue_calculations(stopControl, counter, ns, startTime)) {
+  start_time <- Sys.time()
+  while ((stop_reason <- continue_calculations(stopControl, counter, ns, start_time)) == 'CONTINUE') {
     submodel = sample(1:p,size=m,replace=FALSE,prob=initial_weights)
     lm1 = glm(y~x[,submodel], family = binomial)
     weights = as.numeric((summary(lm1)$coef[-1,3])^2)
@@ -58,7 +57,7 @@ compute_scores = function(y, x, m, stopControl, initial_weights = NULL){
   ns = ifelse(ns!=0,ns,1)
   scores = scores/ns
 
-  return(scores)
+  return (list(scores = scores, stop_reason = stop_reason, ns = ns))
 }
 
 new.logRSM <- function()
@@ -66,13 +65,20 @@ new.logRSM <- function()
 
   logRSM=list(scores=NULL,model=NULL,time=list(user=0,system=0,elapsed=0),
       data_transfer=list(user=0,system=0,elapsed=0),
-      coefficients=NULL, predError=NULL,input_data=list(x=NULL,y=NULL),
-      control=list(selval=NULL,screening=NULL,m=NULL, stopControl = NULL))
+      coefficients=NULL, predError=NULL,input_data=list(x=NULL,y=NULL), ns = NULL,
+      control=list(selval=NULL,screening=NULL,m=NULL, stopControl = NULL, stopReason = NULL))
 
   attr(logRSM,"class")="logRSM"
   return(logRSM)
 }
 
+#' Calculation boundaries for algorithm
+#' 
+#' @param B maximum number of iterations
+#' @param min_ns minimal number of occurences of each variable in selection
+#' @param maximal running time (in seconds)
+#' 
+#' At least one of arguments must be provided.
 logRSMStop <- function (B = NULL, min_ns = NULL, max_time = NULL) {
   if (is.null(B) && is.null(min_ns) && is.null(max_time)) {
     stop("At least one of (B, min_ns, max_time) must be provided")
@@ -158,13 +164,13 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
   #Set score 0, when variable is not selected by screeneing
   if(!is.null(screening)){
     scores1 = numeric(ncol(data_x))
-    scores1[sel] = scores
+    scores1[sel] = scores$scores
     scores = scores1
   }
 
   selval = ifelse(!is.null(yval) && !is.null(xval),TRUE,FALSE)
   if(selval==TRUE){
-    order1 = sort(scores,decreasing=TRUE,index.return=TRUE)$ix
+    order1 = sort(scores$scores,decreasing=TRUE,index.return=TRUE)$ix
     selected_model = select_finalmodel_qr(y,data_x,yval,xval,order1)
     model = selected_model$model
     coefficients =  as.numeric(selected_model$coefficients)
@@ -180,7 +186,9 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
   stopTime <- proc.time()
 
   logRSM = new.logRSM()
-  logRSM$scores = scores
+  logRSM$scores = scores$scores
+  logRSM$stop_reason = scores$stop_reason
+  logRSM$ns = scores$ns
   logRSM$model = model
   logRSM$time = stopTime-startTime
   logRSM$coefficients = coefficients
