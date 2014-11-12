@@ -1,26 +1,59 @@
 # based on regRSM package (http://cran.r-project.org/web/packages/regRSM/)
 
-#' Checks if the given number is whole number.
+#' Assert, if the given number is positive whole number.
 #' 
 #' @param x number to be checked
+#' @param param_name name of parameter, used in \code{stop} argument
 #' @param tol precision
-is.wholenumber = function(x, tol = .Machine$double.eps^0.5){
-  abs(x - round(x)) < tol
+assert.positive_wholenumber = function(x, param_name, tol = .Machine$double.eps^0.5){
+  if (abs(x - round(x)) > tol) {
+    stop('Parameter ', param_name, ' must be a whole number!')
+  }
+  if (x <= 0) {
+    stop('Parameter ', param_name, ' must be a positive number!')
+  }
+}
+  
+continue_calculations = function(stopControl, counter, ns, startTime) {
+  if (!is.null(stopControl$max_time)) {
+    currentTime = Sys.time()
+    if (as.numeric(difftime(currentTime, startTime, units = 'secs')) > stopControl$max_time) {
+      print('czas minal')
+      return (FALSE)
+    }
+  }
+  if (!is.null(stopControl$B)) {
+    if (counter >= stopControl$B) {
+      return (FALSE)
+    }
+  }
+  if (!is.null(stopControl$min_ns)) {
+    min_ns = stopControl$min_ns
+    for (k in ns) {
+      if (k < min_ns) {
+        return (TRUE)
+      }
+    }
+    return (FALSE)
+  }
+  return (TRUE)
 }
 
 #' Compute RSM scores.
-compute_scores = function(y, x, m, B, initial_weights = NULL){
-
+compute_scores = function(y, x, m, stopControl, initial_weights = NULL){
   p = ncol(x)
   scores = numeric(p)
   ns = numeric(p)
 
-  for(k in 1:B){
+  counter = 0
+  startTime <- Sys.time()
+  while (continue_calculations(stopControl, counter, ns, startTime)) {
     submodel = sample(1:p,size=m,replace=FALSE,prob=initial_weights)
     lm1 = glm(y~x[,submodel], family = binomial)
     weights = as.numeric((summary(lm1)$coef[-1,3])^2)
     scores[submodel] =  scores[submodel] + weights
     ns[submodel] = ns[submodel] + 1
+    counter = counter + 1
   }
   ns = ifelse(ns!=0,ns,1)
   scores = scores/ns
@@ -34,20 +67,39 @@ new.logRSM <- function()
   logRSM=list(scores=NULL,model=NULL,time=list(user=0,system=0,elapsed=0),
       data_transfer=list(user=0,system=0,elapsed=0),
       coefficients=NULL, predError=NULL,input_data=list(x=NULL,y=NULL),
-      control=list(selval=NULL,screening=NULL,m=NULL,B=NULL))
+      control=list(selval=NULL,screening=NULL,m=NULL, stopControl = NULL))
 
   attr(logRSM,"class")="logRSM"
   return(logRSM)
 }
 
+logRSMStop <- function (B = NULL, min_ns = NULL, max_time = NULL) {
+  if (is.null(B) && is.null(min_ns) && is.null(max_time)) {
+    stop("At least one of (B, min_ns, max_time) must be provided")
+  }
+  if (!is.null(B)) {
+    assert.positive_wholenumber(B, 'B')
+  }
+  if (!is.null(min_ns)) {
+    assert.positive_wholenumber(min_ns, 'min_ns')
+  }
+  if (!is.null(max_time)) {
+    assert.positive_wholenumber(max_time, 'max_time')
+  }
+  
+  logRSMStop = list(B = B, min_ns = min_ns, max_time = max_time)
+  class(logRSMStop) = "logRSMStop"
+  return (logRSMStop)
+}
+  
 #' Main function - calculate logRSM
 #'
 #' @param x
 #' @param y
 #' @param m
-#' @param B
 #' @param store_data
 #' @param initial_weights
+#' @param stopControl object of \code{logRSMStop} type
 #' @return 
 #' 
 #' \code{initial_weights} parameter could be an array with weights or
@@ -55,9 +107,13 @@ new.logRSM <- function()
 #' and returns weigths.
 #' Two functions \link{calculate_weigths_with_cor} and \link{calculate_weigths_with_t}
 #' are provided.
-logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL, B = NULL,
-    store_data = FALSE, screening = NULL, initial_weights = NULL)
+logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
+    store_data = FALSE, screening = NULL, initial_weights = NULL,
+    stopControl)
 {
+  if (is.null(stopControl)) {
+    stop("stopControl is required")
+  }
   
   # checsk, if initial weights is a function
   if (!is.null(initial_weights)) {
@@ -81,16 +137,9 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL, B = NULL,
     m = floor(min(n-1,p)/2)
   }else{
     if(m>(n-2)) stop("Parameter m cannot be larger than the number of observations minus two!")
-    if(m<=0) stop("Parameter m must be a positive number!")
-    if(!is.wholenumber(m)) stop("Parameter m must be a whole number!")
+    assert.positive_wholenumber(m, 'm')
   }
-  if(is.null(B)){
-    B = 1000
-  }else{
-    if(B<=0) stop("Parameter B must be a positive number!")
-    if(!is.wholenumber(B)) stop("Parameter B must be a whole number!")
-  }
-
+  
   #Check for screeneing
   if(!is.null(screening))
   {
@@ -104,7 +153,7 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL, B = NULL,
 
   #RSM method esence
   d1=d2=proc.time()
-  scores = compute_scores(y,x,m,B,initial_weights)
+  scores = compute_scores(y, x, m, stopControl = stopControl, initial_weights)
 
   #Set score 0, when variable is not selected by screeneing
   if(!is.null(screening)){
@@ -147,7 +196,7 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL, B = NULL,
   logRSM$control$screening = screening
   logRSM$control$initial_weights =  initial_weights
   logRSM$control$m = m
-  logRSM$control$B = B
+  logRSM$control$stopControl = stopControl
 
   return(logRSM)
 }
