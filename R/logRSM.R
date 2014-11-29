@@ -47,15 +47,15 @@ compute_scores = function(y, x, m, stopControl, initial_weights = NULL){
   counter = 0
   start_time <- Sys.time()
   while ((stop_reason <- continue_calculations(stopControl, counter, ns, start_time)) == 'CONTINUE') {
-    submodel = sample(1:p,size=m,replace=FALSE,prob=initial_weights)
+    submodel = sample(1:p, size = m, replace = FALSE, prob = initial_weights)
     lm1 = glm(y~x[,submodel], family = binomial)
-    weights = as.numeric((summary(lm1)$coef[-1,3])^2)
+#    lm1 = glm.fit(x[,submodel], y, family = binomial(), intercept = TRUE)
+    weights = as.numeric((summary(lm1)$coefficients[-1, 3])^2)
     scores[submodel] =  scores[submodel] + weights
     ns[submodel] = ns[submodel] + 1
     counter = counter + 1
   }
-  ns = ifelse(ns!=0,ns,1)
-  scores = scores/ns
+  scores = scores/ifelse(ns!=0,ns,1)
 
   return (list(scores = scores, stop_reason = stop_reason, ns = ns))
 }
@@ -111,7 +111,7 @@ logRSMStop <- function (B = NULL, min_ns = NULL, max_time = NULL) {
 #' \code{initial_weights} parameter could be an array with weights or
 #' a function, that accepts two parameters: \code{class} and \code{data}
 #' and returns weigths.
-#' Two functions \link{calculate_weigths_with_cor} and \link{calculate_weigths_with_t}
+#' Two functions \link{calculate_weigths_with_univ} and \link{calculate_weigths_with_t}
 #' are provided.
 logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
     store_data = FALSE, screening = NULL, initial_weights = NULL,
@@ -123,7 +123,7 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
   
   # checsk, if initial weights is a function
   if (!is.null(initial_weights)) {
-    # if it's a functtion - call it
+    # if it's a function - call it
     if (is.function(initial_weights)) {
       initial_weights = initial_weights(y, x)
     }
@@ -139,18 +139,20 @@ logRSM = function(y, x, yval = NULL, xval = NULL, m = NULL,
   startTime <- proc.time()
 
   # Set default values of m and B
-  if(is.null(m)){
-    m = floor(min(n-1,p)/2)
-  }else{
-    if(m>(n-2)) stop("Parameter m cannot be larger than the number of observations minus two!")
+  if (is.null(m)) {
+    m = floor(min(n-1, p)/2)
+  } else {
+    if (m > (n - 2)) {
+      stop("Parameter m cannot be larger than the number of observations minus two!")
+    }
     assert.positive_wholenumber(m, 'm')
   }
   
   #Check for screeneing
-  if(!is.null(screening))
-  {
-    if((screening>=1)||(screening<=0)) stop("screening must be in (0,1)")
-
+  if (!is.null(screening)) {
+    if ((screening>=1)||(screening<=0)) {
+      stop("screening must be in (0,1)")
+     }
     iw =  compute_initial_weights(y,x)
     sel = which(iw>=quantile(iw,screening))
     if(m>length(sel)) stop('Parameter m cannot be larger than the number of attributes remaining after screening procedure!')
@@ -229,9 +231,13 @@ calculate_weigths_with_t = function(class, data) {
   return (result)
 }
 
-#' calculate weights using correlations.
-calculate_weigths_with_cor = function(class, data) {
-  initial_weights = as.numeric(cor(class, data))^2
-  initial_weights = initial_weights/(sum(initial_weights))
-  return(initial_weights)
+#' Calculatw weights using univariate model
+calculate_weighss_with_univ = function(class, data) {
+  result = numeric(ncol(data)); 
+  for (i in 1:ncol(data)) {
+    lm1 = glm(class~data[,i], family = binomial)
+    result[i] = as.numeric((summary(lm1)$coefficients[-1,3])^2)
+  }
+  result = result / sum(result)
+  return (result)
 }
